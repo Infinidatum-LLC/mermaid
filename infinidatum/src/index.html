@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Infinidatum Mermaid</title>
+    <meta
+      name="description"
+      content="Infinidatum's self-hosted Mermaid {{VERSION}} build, the infd-diagram component and a parse API."
+    />
+    <style>
+      :root {
+        --bg: #ffffff;
+        --panel: #f3f7f5;
+        --ink: #0c1b2e;
+        --muted: #52635e;
+        --rule: #c9d6d1;
+        --accent: #00664f;
+        --code: #f6f8f7;
+        --infd-card: #ffffff;
+        --infd-panel: #e7f1ed;
+        --infd-ink: #0c1b2e;
+        --infd-ink-soft: #2d4058;
+        --infd-rule: #8aa098;
+        --infd-accent: #00664f;
+        --infd-ai: #2c65aa;
+        --infd-ai-bg: #e4eefa;
+        --infd-good: #2d7a20;
+        --infd-good-bg: #e5f6de;
+        --infd-risk: #be123c;
+        --infd-risk-bg: #ffe4e8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1014;
+          --panel: #121a20;
+          --ink: #e6ede9;
+          --muted: #9aaba5;
+          --rule: #2a3a36;
+          --accent: #4fc3a1;
+          --code: #111820;
+          --infd-card: #121a20;
+          --infd-panel: #1b2a2f;
+          --infd-ink: #e6ede9;
+          --infd-ink-soft: #9fb2c8;
+          --infd-rule: #3b5049;
+          --infd-accent: #4fc3a1;
+          --infd-ai: #7fb0ea;
+          --infd-ai-bg: #16283d;
+          --infd-good: #7cc76a;
+          --infd-good-bg: #15291a;
+          --infd-risk: #f2809b;
+          --infd-risk-bg: #33161f;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          16px/1.55 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 32px 16px 64px;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0 0 4px;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 40px 0 8px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      code,
+      pre,
+      textarea {
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+        font-size: 13px;
+      }
+      code {
+        background: var(--code);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+      pre {
+        background: var(--code);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 12px;
+        overflow-x: auto;
+      }
+      a {
+        color: var(--accent);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        text-align: left;
+        border-bottom: 1px solid var(--rule);
+        padding: 6px 8px;
+        vertical-align: top;
+      }
+      .demo {
+        margin-top: 12px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 160px;
+        background: var(--code);
+        color: var(--ink);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 10px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 8px 0;
+        flex-wrap: wrap;
+      }
+      button {
+        font: inherit;
+        font-size: 14px;
+        background: var(--accent);
+        color: var(--bg);
+        border: 0;
+        border-radius: 4px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      #parse-out {
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Infinidatum Mermaid</h1>
+      <p class="muted">
+        Mermaid {{VERSION}}, built from
+        <a href="https://github.com/Infinidatum-LLC/mermaid">Infinidatum-LLC/mermaid</a> at
+        <code>{{COMMIT}}</code>. Every project loads diagrams from here instead of a public CDN.
+      </p>
+
+      <h2>1. Draw a themed, animated flow</h2>
+      <p>
+        One script tag, then <code>&lt;infd-diagram&gt;</code> anywhere. The flow builds in order
+        when it scrolls into view. <em>Next step</em> walks it one stage at a time.
+      </p>
+      <pre>&lt;script type="module" src="https://<span class="host"></span>/v/{{VERSION}}/diagram.js"&gt;&lt;/script&gt;
+
+&lt;infd-diagram caption="A person checks every draft before a member sees it."
+              alt="Staff ask, the AI drafts, a person reviews, then it is sent or fixed."&gt;
+flowchart LR
+  A[Staff ask]:::person --&gt; B[AI drafts]:::ai --&gt; C{Reviewed?}
+  C --&gt;|Yes| D[Send]:::done
+  C --&gt;|No| E[Fix or discard]:::risk
+&lt;/infd-diagram&gt;</pre>
+      <div class="demo">
+        <infd-diagram
+          caption="A person checks every draft before a member sees it."
+          alt="Staff ask, the AI drafts, a person reviews, then it is sent or fixed."
+        >
+          flowchart LR A[Staff ask]:::person --> B[AI drafts]:::ai --> C{Reviewed?} C -->|Yes|
+          D[Send]:::done C -->|No| E[Fix or discard]:::risk
+        </infd-diagram>
+      </div>
+
+      <h2>2. Options</h2>
+      <table>
+        <tr>
+          <th>Attribute</th>
+          <th>Values</th>
+        </tr>
+        <tr>
+          <td><code>caption</code></td>
+          <td>One sentence above the diagram.</td>
+        </tr>
+        <tr>
+          <td><code>alt</code></td>
+          <td>The flow in words, for screen readers. The SVG itself is hidden from them.</td>
+        </tr>
+        <tr>
+          <td><code>animate</code></td>
+          <td>
+            <code>auto</code> (default) or <code>none</code>. Reduced-motion users always get
+            <code>none</code>.
+          </td>
+        </tr>
+        <tr>
+          <td><code>controls</code></td>
+          <td><code>none</code> hides Next step and Replay.</td>
+        </tr>
+        <tr>
+          <td><code>fit</code></td>
+          <td>
+            <code>auto</code> (default) draws a flowchart both ways and keeps the one that fits the
+            column. <code>authored</code> keeps your direction.
+          </td>
+        </tr>
+      </table>
+      <p>
+        Box classes: <code>:::person</code> <code>:::ai</code> <code>:::check</code>
+        <code>:::risk</code> <code>:::done</code>. Their colors come from CSS custom properties you
+        set on any ancestor: <code>--infd-card</code>, <code>--infd-panel</code>,
+        <code>--infd-ink</code>, <code>--infd-ink-soft</code>, <code>--infd-rule</code>,
+        <code>--infd-accent</code>, <code>--infd-ai</code>, <code>--infd-ai-bg</code>,
+        <code>--infd-good</code>, <code>--infd-good-bg</code>, <code>--infd-risk</code>,
+        <code>--infd-risk-bg</code>, <code>--infd-font</code>. Any CSS color works. Other diagram
+        types (sequence, class, gantt) draw too, without the step animation.
+      </p>
+      <p>
+        Set <code>element.code = "..."</code> to redraw from script. The element fires
+        <code>infd-drawn</code> and <code>infd-error</code>.
+      </p>
+
+      <h2>3. Use plain Mermaid</h2>
+      <pre>import mermaid from "https://<span class="host"></span>/v/{{VERSION}}/mermaid.esm.min.mjs";
+// or the classic build: &lt;script src="https://<span class="host"></span>/v/{{VERSION}}/mermaid.min.js"&gt;&lt;/script&gt;</pre>
+      <p class="muted">
+        <code>/v/{{VERSION}}/</code> never changes and is cached for a year.
+        <code>/latest/</code> follows the fork and is cached for five minutes. Pin a version in
+        production.
+      </p>
+
+      <h2>4. Check diagrams in CI</h2>
+      <p>
+        <code>POST /api/parse</code> checks syntax with this exact build. A syntax error comes back
+        as <code>ok: false</code> with the message and line.
+      </p>
+      <pre>curl -s https://<span class="host"></span>/api/parse \
+  -H 'content-type: application/json' \
+  -d '{"diagrams": {"lesson-1": "flowchart LR\n A --&gt; B", "lesson-2": "flowchart LR\n A[x --&gt; B"}}'</pre>
+      <textarea id="parse-in" aria-label="Diagram source">
+flowchart TD
+  A[Text to paste]:::person --> B{Approved tool?}
+  B -->|No| X[Stop]:::risk
+  B -->|Yes| C[Swap in placeholders]:::check
+  C --> D[Send the prompt]:::done</textarea
+      >
+      <div class="row">
+        <button id="parse-btn" type="button">Parse and draw</button
+        ><span id="parse-out" aria-live="polite"></span>
+      </div>
+      <infd-diagram id="parse-view" caption="Your diagram."></infd-diagram>
+
+      <p class="muted" style="margin-top: 40px">
+        <a href="/versions.json">versions.json</a> · <a href="/api/health">/api/health</a>
+      </p>
+    </main>
+    <script type="module">
+      import '/v/{{VERSION}}/diagram.js';
+      for (const el of document.querySelectorAll('.host')) el.textContent = location.host;
+      const input = document.getElementById('parse-in');
+      const out = document.getElementById('parse-out');
+      const view = document.getElementById('parse-view');
+      async function run() {
+        out.textContent = 'Parsing…';
+        try {
+          const res = await fetch('/api/parse', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ code: input.value }),
+          });
+          const r = await res.json();
+          out.textContent = r.ok
+            ? `Valid ${r.diagramType} (Mermaid ${r.version}).`
+            : `Error${r.line ? ` on line ${r.line}` : ''}: ${r.error.split('\n')[0]}`;
+          if (r.ok) view.code = input.value;
+        } catch (e) {
+          out.textContent = `Could not reach the API: ${e.message}`;
+        }
+      }
+      document.getElementById('parse-btn').addEventListener('click', run);
+      view.code = input.value;
+    </script>
+  </body>
+</html>

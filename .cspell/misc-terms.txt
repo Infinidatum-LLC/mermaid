@@ -4,6 +4,7 @@ Buzan
 circo
 GHSA
 handDrawn
+infinidatum
 KOEPF
 MMLU
 neato

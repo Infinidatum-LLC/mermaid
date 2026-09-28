@@ -22,6 +22,8 @@ export default tseslint.config(
       '**/node_modules/',
       '.git/',
       '.claude/',
+      // Infinidatum's Vercel site: plain browser and Node modules, tested with node --test.
+      'infinidatum/',
       '**/generated/',
       '**/coverage/',
       'packages/mermaid/src/config.type.ts',

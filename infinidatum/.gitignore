@@ -1,0 +1,5 @@
+node_modules/
+public/
+api/_mermaid.mjs
+.vercel
+.t/

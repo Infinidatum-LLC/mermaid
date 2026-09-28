@@ -1,0 +1,13 @@
+{
+  "name": "@infinidatum/mermaid-site",
+  "private": true,
+  "type": "module",
+  "description": "Infinidatum's hosted Mermaid build, <infd-diagram> component and parse API, served from Vercel.",
+  "scripts": {
+    "build": "node scripts/assemble.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "linkedom": "^0.18.12"
+  }
+}
