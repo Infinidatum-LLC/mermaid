@@ -1,5 +1,5 @@
 /**
- * <infd-diagram> — one Mermaid flowchart, themed and animated in flow order.
+ * <infd-diagram> — one Mermaid diagram, themed and animated in the order it reads.
  *
  * Served next to the Mermaid build it imports, so a page needs one script tag:
  *
@@ -10,14 +10,27 @@
  *   </infd-diagram>
  *
  * Attributes
- *   caption   One sentence shown above the diagram.
- *   alt       The flow in words, for screen readers. The SVG itself is hidden from them.
- *   animate   "auto" (default) builds the flow when it scrolls into view; "none" draws it still.
- *   controls  "none" hides Next step / Replay.
- *   fit       "auto" (default) draws a flowchart both ways and keeps the direction that
- *             fits the column; "authored" keeps the direction as written.
+ *   caption    One sentence shown above the diagram.
+ *   alt        The diagram in words, for screen readers. The SVG itself is hidden from them.
+ *   src        URL of a .mmd file to draw, instead of the element's text.
+ *   animate    "auto" (default) builds the diagram when it scrolls into view; "none" draws it still.
+ *   speed      Animation speed multiplier, 0.25 to 4. Default 1.
+ *   controls   "none" hides Back / Next step / Replay.
+ *   fit        "auto" (default) draws a flowchart both ways and keeps the direction that
+ *              fits the column; "authored" keeps the direction as written.
+ *   theme      "light" (default), "dark" or "auto" (follows the reader). --infd-* still win.
+ *   flow       "dots" sends dots along the arrows once the diagram is complete.
+ *   highlight  "hover" (default) lights a box and its neighbors under the pointer; "none" turns it off.
+ *   focus      Node ids, comma-separated, to keep lit while everything else dims.
+ *   tools      Any of "zoom fullscreen export", or "all". Default none.
  *
- * Source comes from the element's text, or the `code` property.
+ * Flowcharts, state and class diagrams build by distance from the start;
+ * sequence diagrams build message by message. Other types draw still.
+ * `%% step A, B | caption` comments script the steps (see lib/steps.js).
+ *
+ * Events: infd-drawn { svg, steps }, infd-step { step, total, caption },
+ * infd-node-click { id }, infd-error.
+ * Methods: play(), next(), prev(), goTo(n), toSvg(), toPng(), download("svg" | "png").
  *
  * Box classes :::person :::ai :::check :::risk :::done take their colors from CSS
  * custom properties on the element or any ancestor (any CSS color works):
@@ -25,293 +38,89 @@
  *   --infd-accent --infd-ai --infd-ai-bg --infd-good --infd-good-bg --infd-risk --infd-risk-bg
  *   --infd-font
  *
- * Reduced motion draws the diagram complete and still. It is also drawn complete
- * first, so a printed page, or one never scrolled this far, shows the whole flow.
+ * Reduced motion draws the diagram complete and still, with no moving dots. It
+ * is also drawn complete first, so a printed page, or one never scrolled this
+ * far, shows the whole diagram.
  */
-import mermaid from './mermaid.esm.min.mjs';
+import { mermaid, renderDiagram, renderSvgString, size } from './lib/render.js';
+import { buildSteps, parseScript } from './lib/steps.js';
+import { MOTION_STYLE, drawEdge, emphasize, fadeIn, startFlow } from './lib/motion.js';
+import { Viewport } from './lib/viewport.js';
+import { download, toPng, toSvg } from './lib/export.js';
+import { DIAGRAM_CLASSES, PRESETS, readTheme, themeFrom } from './lib/theme.js';
 
-export { mermaid };
-
-export const DIAGRAM_CLASSES = ['person', 'ai', 'check', 'risk', 'done'];
-
-const MAX_HEIGHT = 640;
-const MIN_SCALE = 0.8;
-
-const DEFAULTS = {
-  card: '#ffffff',
-  panel: '#e7f1ed',
-  ink: '#0c1b2e',
-  'ink-soft': '#2d4058',
-  rule: '#6a887e',
-  accent: '#00664f',
-  ai: '#2c65aa',
-  'ai-bg': '#e4eefa',
-  good: '#2d7a20',
-  'good-bg': '#e5f6de',
-  risk: '#be123c',
-  'risk-bg': '#ffe4e8',
+export {
+  mermaid,
+  renderDiagram,
+  renderSvgString,
+  buildSteps,
+  parseScript,
+  readTheme,
+  themeFrom,
+  toSvg,
+  toPng,
+  DIAGRAM_CLASSES,
+  PRESETS,
 };
 
-/* ---------- drawing ---------- */
+/** Kept for pages written against the first release. */
+export const rankGraph = (svg) => buildSteps(svg).steps;
 
-// Mermaid keeps one set of settings and one scratch element, so draws take turns.
-let queue = Promise.resolve();
-function inTurn(job) {
-  const run = queue.then(job, job);
-  queue = run.catch(() => undefined);
-  return run;
-}
-
-let counter = 0;
-
-/**
- * Draws `code` into `host` and returns the SVG element. Used by <infd-diagram>,
- * and exported for pages that want the drawing without the element.
- */
-export function renderDiagram(host, code, { fit = 'auto', theme = readTheme(host) } = {}) {
-  return inTurn(async () => {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: 'base',
-      fontFamily: theme.font,
-      themeVariables: {
-        fontFamily: theme.font,
-        fontSize: '14px',
-        primaryColor: theme.card,
-        primaryBorderColor: theme.rule,
-        primaryTextColor: theme.ink,
-        lineColor: theme['ink-soft'],
-        textColor: theme.ink,
-        edgeLabelBackground: theme.card,
-        tertiaryColor: theme.panel,
-      },
-      flowchart: {
-        htmlLabels: true,
-        curve: 'basis',
-        useMaxWidth: true,
-        padding: 8,
-        nodeSpacing: 28,
-        rankSpacing: 36,
-        wrappingWidth: 130,
-      },
-    });
-    const id = `infd-diagram-${++counter}`;
-    const flow = /^\s*flowchart\s+(LR|TD|TB|RL|BT)\b/.exec(code);
-    const source = (c) => (flow ? `${c}\n${classDefs(theme)}` : c);
-    const draw = async (c) => {
-      const { svg } = await mermaid.render(id, source(c));
-      host.innerHTML = svg;
-      const el = host.querySelector('svg');
-      return el && { svg: el, fit: fitScale(el, host.clientWidth) };
-    };
-    const first = await draw(code);
-    if (!first) throw new Error('Mermaid drew nothing');
-    let chosen = first;
-    // The flow reads either way, so draw it both ways and keep the one that
-    // fits its column at the larger size. Ties go to the authored direction.
-    if (fit === 'auto' && flow && (flow[1] === 'LR' || flow[1] === 'TD' || flow[1] === 'TB')) {
-      const turned = code.replace(
-        /^(\s*flowchart\s+)(LR|TD|TB)/,
-        (_, a, d) => a + (d === 'LR' ? 'TD' : 'LR')
-      );
-      const second = await draw(turned);
-      chosen = second && second.fit > first.fit * 1.1 ? second : await draw(code);
-    }
-    const svg = chosen.svg;
-    svg.setAttribute('aria-hidden', 'true');
-    // Never smaller than MIN_SCALE: past that the words blur, and a sideways
-    // scroll reads better than a squint.
-    svg.style.maxWidth = 'none';
-    svg.style.width = `${Math.round(svg.viewBox.baseVal.width * Math.max(MIN_SCALE, fitScale(svg, host.clientWidth)))}px`;
-    svg.style.height = 'auto';
-    return svg;
-  });
-}
-
-function fitScale(svg, width) {
-  const { width: w, height: h } = svg.viewBox.baseVal;
-  if (!w || !h || !width) return 1;
-  return Math.min(1, width / w, MAX_HEIGHT / h);
-}
-
-/* ---------- ranking the flow ---------- */
-
-/**
- * Groups boxes by distance from the start. Mermaid names each box
- * `<svg id>-flowchart-<node>-<n>` and each arrow `L_<from>_<to>_<n>`, which is
- * all the graph this needs. A loop back keeps the rank its box was first
- * reached at. Non-flowchart diagrams come back with no ranks and draw still.
- */
-export function rankGraph(svg) {
-  const nodes = new Map();
-  svg.querySelectorAll('g.node').forEach((g) => {
-    const m = /-flowchart-(.+)-\d+$/.exec(g.id);
-    if (m) nodes.set(m[1], g);
-  });
-  const edges = [];
-  svg.querySelectorAll('path.flowchart-link').forEach((path) => {
-    const key = path.dataset.id || '';
-    const ends = splitEdge(key, nodes);
-    if (!ends) return;
-    const labels = [...svg.querySelectorAll(`.edgeLabel .label[data-id="${CSS.escape(key)}"]`)].map(
-      (l) => l.closest('.edgeLabel') || l
-    );
-    edges.push({ ...ends, path, labels });
-  });
-  if (nodes.size === 0) return [];
-
-  const rank = new Map();
-  const incoming = new Set(edges.map((e) => e.to));
-  let frontier = [...nodes.keys()].filter((n) => !incoming.has(n));
-  if (frontier.length === 0) frontier = [...nodes.keys()].slice(0, 1);
-  frontier.forEach((n) => rank.set(n, 0));
-  for (let r = 0; frontier.length; r++) {
-    const next = [];
-    for (const e of edges) {
-      if (frontier.includes(e.from) && !rank.has(e.to)) {
-        rank.set(e.to, r + 1);
-        next.push(e.to);
-      }
-    }
-    frontier = next;
-  }
-  const last = Math.max(0, ...rank.values());
-  nodes.forEach((_, n) => rank.has(n) || rank.set(n, last));
-
-  const out = Array.from({ length: last + 1 }, () => ({ nodes: [], edges: [], labels: [] }));
-  nodes.forEach((g, n) => out[rank.get(n)].nodes.push(g));
-  // An arrow draws with the later of its two ends, so a loop back appears once both boxes are there.
-  for (const e of edges) {
-    const r = Math.max(rank.get(e.from) ?? 0, rank.get(e.to) ?? 0);
-    out[r].edges.push(e.path);
-    out[r].labels.push(...e.labels);
-  }
-  return out;
-}
-
-function splitEdge(key, nodes) {
-  const body = key.replace(/^L[_-]/, '').replace(/[_-]\d+$/, '');
-  for (let i = body.indexOf('_'); i > 0; i = body.indexOf('_', i + 1)) {
-    const from = body.slice(0, i);
-    const to = body.slice(i + 1);
-    if (nodes.has(from) && nodes.has(to)) return { from, to };
-  }
-  return undefined;
-}
-
-/* ---------- motion ---------- */
-
-// Opacity only: Mermaid places boxes with a transform attribute, which a CSS transform would replace.
-function fadeIn(el, on, fresh, delay) {
-  el.getAnimations().forEach((a) => a.cancel());
-  el.style.opacity = on ? '1' : '0';
-  if (on && fresh)
-    el.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: 380,
-      delay,
-      easing: 'cubic-bezier(.2,.7,.3,1)',
-      fill: 'backwards',
-    });
-}
-
-function drawEdge(path, on, fresh) {
-  path.getAnimations().forEach((a) => a.cancel());
-  path.style.opacity = on ? '1' : '0';
-  if (!on || !fresh) return;
-  const len = path.getTotalLength();
-  // A dotted arrow keeps its own dashes; only a solid one draws along its length.
-  const solid =
-    !path.classList.contains('edge-pattern-dotted') &&
-    !path.classList.contains('edge-pattern-dashed');
-  if (solid) {
-    path.animate(
-      [
-        { strokeDasharray: `${len}`, strokeDashoffset: `${len}` },
-        { strokeDasharray: `${len}`, strokeDashoffset: '0' },
-      ],
-      {
-        duration: 420,
-        easing: 'ease-out',
-        fill: 'backwards',
-      }
-    );
-  } else {
-    path.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 420, fill: 'backwards' });
-  }
-}
-
-/* ---------- theme ---------- */
-
-/** Reads --infd-* from the element, resolving any CSS color to hex for Mermaid. */
-export function readTheme(el) {
-  const css = getComputedStyle(el);
-  const probe = document.createElement('span');
-  probe.style.display = 'none';
-  (el.shadowRoot ?? el).appendChild(probe);
-  const resolve = (name) => {
-    const raw = css.getPropertyValue(`--infd-${name}`).trim();
-    if (!raw) return DEFAULTS[name];
-    probe.style.color = '';
-    probe.style.color = raw;
-    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(probe).color);
-    return m
-      ? `#${m
-          .slice(1, 4)
-          .map((n) => Number(n).toString(16).padStart(2, '0'))
-          .join('')}`
-      : DEFAULTS[name];
-  };
-  const theme = Object.fromEntries(Object.keys(DEFAULTS).map((k) => [k, resolve(k)]));
-  probe.remove();
-  theme.font =
-    css.getPropertyValue('--infd-font').trim() || css.fontFamily || 'system-ui, sans-serif';
-  return theme;
-}
-
-function classDefs(t) {
-  return [
-    `classDef person fill:${t.panel},stroke:${t['ink-soft']},color:${t.ink}`,
-    `classDef ai fill:${t['ai-bg']},stroke:${t.ai},color:${t.ink}`,
-    `classDef check fill:${t.card},stroke:${t.accent},stroke-width:2px,color:${t.ink}`,
-    `classDef risk fill:${t['risk-bg']},stroke:${t.risk},color:${t.ink}`,
-    `classDef done fill:${t['good-bg']},stroke:${t.good},color:${t.ink}`,
-  ].join('\n');
-}
-
-/* ---------- the element ---------- */
+// The frame follows the same colors as the drawing: --infd-* when set, else the preset.
+const chrome = (preset) =>
+  ['card', 'ink', 'rule', 'accent', 'risk']
+    .map((k) => `--c-${k}: var(--infd-${k}, ${PRESETS[preset][k]});`)
+    .join(' ');
 
 const STYLE = `
-:host { display: block; }
-figure { margin: 0; border: 1px solid var(--infd-rule, #8aa098); background: var(--infd-card, #fff); border-radius: 2px; padding: 12px; color: var(--infd-ink, #0c1b2e); font-family: var(--infd-font, inherit); }
+:host { display: block; ${chrome('light')} }
+:host([theme='dark']) { ${chrome('dark')} }
+@media (prefers-color-scheme: dark) { :host([theme='auto']) { ${chrome('dark')} } }
+figure { margin: 0; border: 1px solid var(--c-rule); background: var(--c-card); border-radius: 2px; padding: 12px; color: var(--c-ink); font-family: var(--infd-font, inherit); }
+figure:fullscreen { display: flex; flex-direction: column; border: 0; border-radius: 0; }
+figure:fullscreen .draw { flex: 1; max-height: none; }
 figcaption { margin-bottom: 8px; font-size: 12px; font-weight: 500; }
 figcaption:empty { display: none; }
-.draw { min-height: 140px; overflow-x: auto; }
+.draw { min-height: 140px; overflow: auto; }
+.draw.zoomable { max-height: 80vh; }
+.draw.zoomed { cursor: grab; }
+.draw.panning { cursor: grabbing; user-select: none; }
 .draw svg { display: block; margin: 0 auto; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.controls { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
-.controls[hidden] { display: none; }
-button { font: inherit; color: inherit; background: none; cursor: pointer; border: 1px solid var(--infd-rule, #8aa098); border-radius: 2px; padding: 4px 8px; }
-button:hover { border-color: var(--infd-accent, #00664f); }
-button:focus-visible { outline: 2px solid var(--infd-accent, #00664f); outline-offset: 2px; }
+.say { margin: 8px 0 0; font-size: 13px; min-height: 1.4em; }
+.say:empty { display: none; }
+.bar { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+[hidden] { display: none !important; }
+.tools { margin-left: auto; display: flex; gap: 4px; }
+button { font: inherit; color: inherit; background: none; cursor: pointer; border: 1px solid var(--c-rule); border-radius: 2px; padding: 4px 8px; }
+button:hover { border-color: var(--c-accent); }
+button:disabled { opacity: .4; cursor: default; }
+button:focus-visible, figure:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
 .step { font-family: ui-monospace, monospace; opacity: .75; }
-.error { font-size: 12px; color: var(--infd-risk, #be123c); white-space: pre-wrap; }
-`;
+.error { font-size: 12px; color: var(--c-risk); white-space: pre-wrap; }
+${MOTION_STYLE}`;
+
+const TOOLS = ['zoom', 'fullscreen', 'export'];
 
 export class InfdDiagram extends HTMLElement {
   static get observedAttributes() {
-    return ['caption', 'alt', 'controls'];
+    return ['caption', 'alt', 'controls', 'tools', 'focus', 'flow', 'highlight', 'src', 'theme'];
   }
 
   #code;
-  #ranks = [];
+  #fetched;
+  #steps = [];
+  #graph = null;
+  #svg = null;
   #shown = 0;
   #timers = [];
+  #stopFlow = () => undefined;
   #seen;
   #root;
   #resize;
   #width = 0;
   #drawing = false;
+  #view;
 
   constructor() {
     super();
@@ -321,23 +130,62 @@ export class InfdDiagram extends HTMLElement {
         <figcaption part="caption"></figcaption>
         <p class="sr"></p>
         <div class="draw" part="drawing"></div>
-        <div class="controls" part="controls" hidden>
-          <button type="button" class="next" part="button">Next step</button>
-          <button type="button" class="replay" part="button">Replay</button>
-          <span class="step" aria-live="polite"></span>
+        <p class="say" part="step-caption" aria-live="polite"></p>
+        <div class="bar" part="controls">
+          <span class="steps">
+            <button type="button" class="prev" part="button" aria-label="Previous step">Back</button>
+            <button type="button" class="next" part="button">Next step</button>
+            <button type="button" class="replay" part="button">Replay</button>
+            <span class="step" aria-live="polite"></span>
+          </span>
+          <span class="tools" part="tools">
+            <button type="button" data-tool="zoom" data-act="out" part="button" aria-label="Zoom out">−</button>
+            <button type="button" data-tool="zoom" data-act="reset" part="button" aria-label="Reset zoom" class="pct">100%</button>
+            <button type="button" data-tool="zoom" data-act="in" part="button" aria-label="Zoom in">+</button>
+            <button type="button" data-tool="fullscreen" data-act="full" part="button">Fullscreen</button>
+            <button type="button" data-tool="export" data-act="svg" part="button">SVG</button>
+            <button type="button" data-tool="export" data-act="png" part="button">PNG</button>
+          </span>
         </div>
       </figure>`;
-    this.#root.querySelector('.next').addEventListener('click', () => this.next());
-    this.#root.querySelector('.replay').addEventListener('click', () => this.play());
+    const $ = (s) => this.#root.querySelector(s);
+    $('.next').addEventListener('click', () => this.next());
+    $('.prev').addEventListener('click', () => this.prev());
+    $('.replay').addEventListener('click', () => this.play());
+    $('.tools').addEventListener('click', (e) =>
+      this.#tool(e.target.closest('button')?.dataset.act)
+    );
+    $('figure').addEventListener('keydown', (e) => {
+      if (e.target !== e.currentTarget || this.#steps.length < 2) return;
+      if (e.key === 'ArrowRight') this.next();
+      else if (e.key === 'ArrowLeft') this.prev();
+      else return;
+      e.preventDefault();
+    });
+    $('figure').addEventListener('fullscreenchange', () => this.#refit());
+    this.#view = new Viewport(
+      $('.draw'),
+      (z) => ($('.pct').textContent = `${Math.round(z * 100)}%`)
+    );
+    this.#hover($('.draw'));
   }
 
   get code() {
-    return this.#code ?? this.textContent.trim();
+    return this.#code ?? this.#fetched ?? this.textContent.trim();
   }
 
   set code(value) {
     this.#code = String(value);
     if (this.isConnected) this.#draw();
+  }
+
+  /** The steps of the current drawing, as `{ nodes, edges, labels, caption }`. */
+  get steps() {
+    return this.#steps;
+  }
+
+  get step() {
+    return this.#shown;
   }
 
   connectedCallback() {
@@ -348,46 +196,101 @@ export class InfdDiagram extends HTMLElement {
     this.#resize = new ResizeObserver(([entry]) => {
       const w = Math.round(entry.contentRect.width);
       if (!this.#width || Math.abs(w - this.#width) < 24 || this.#drawing) return;
+      if (document.fullscreenElement) return;
       clearTimeout(wait);
       wait = setTimeout(() => this.#draw({ still: true }), 150);
     });
     this.#resize.observe(this);
     // Parsers deliver an element's text after it connects; wait for it.
     if (document.readyState === 'loading')
-      document.addEventListener('DOMContentLoaded', () => this.#draw(), { once: true });
-    else queueMicrotask(() => this.#draw());
+      document.addEventListener('DOMContentLoaded', () => this.#load(), { once: true });
+    else queueMicrotask(() => this.#load());
   }
 
   disconnectedCallback() {
     this.#resize?.disconnect();
     this.#seen?.disconnect();
     this.#clear();
+    this.#stopFlow();
   }
 
-  attributeChangedCallback() {
+  attributeChangedCallback(name, old, value) {
     this.#sync();
+    if (!this.isConnected || old === value) return;
+    if (name === 'src') {
+      this.#fetched = undefined;
+      this.#load();
+    } else if (!this.#svg) return;
+    else if (name === 'theme') this.#draw({ still: true });
+    else if (name === 'focus') this.#emphasize();
+    else if (name === 'flow') this.#reveal(this.#shown, false);
+  }
+
+  // The reader's setting stops all motion; animate="none" stops only the build.
+  get #still() {
+    return matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
   get #reduced() {
-    return (
-      this.getAttribute('animate') === 'none' ||
-      matchMedia('(prefers-reduced-motion: reduce)').matches
-    );
+    return this.getAttribute('animate') === 'none' || this.#still;
+  }
+
+  get #speed() {
+    const s = Number(this.getAttribute('speed'));
+    return Number.isFinite(s) && s > 0 ? Math.min(4, Math.max(0.25, s)) : 1;
+  }
+
+  get #tools() {
+    const raw = (this.getAttribute('tools') ?? '').toLowerCase();
+    return raw === 'all' ? TOOLS : TOOLS.filter((t) => raw.split(/[\s,]+/).includes(t));
+  }
+
+  get #theme() {
+    return readTheme(this, this.getAttribute('theme') ?? 'light');
+  }
+
+  get #highlight() {
+    return this.getAttribute('highlight') !== 'none';
   }
 
   #sync() {
-    this.#root.querySelector('figcaption').textContent = this.getAttribute('caption') ?? '';
-    this.#root.querySelector('.sr').textContent = this.getAttribute('alt') ?? '';
+    const $ = (s) => this.#root.querySelector(s);
+    $('figcaption').textContent = this.getAttribute('caption') ?? '';
+    $('.sr').textContent = this.getAttribute('alt') ?? '';
+    const tools = this.#tools;
+    this.#root.querySelectorAll('[data-tool]').forEach((b) => {
+      b.hidden = !tools.includes(b.dataset.tool);
+    });
+    $('.tools').hidden = tools.length === 0;
+    $('.draw').classList.toggle('zoomable', tools.includes('zoom'));
     this.#controls();
   }
 
   #controls() {
-    const box = this.#root.querySelector('.controls');
-    const total = this.#ranks.length;
-    box.hidden = this.getAttribute('controls') === 'none' || total < 2;
+    const $ = (s) => this.#root.querySelector(s);
+    const total = this.#steps.length;
+    const stepping = this.getAttribute('controls') !== 'none' && total >= 2;
+    $('.steps').hidden = !stepping;
+    $('.bar').hidden = !stepping && $('.tools').hidden;
+    $('figure').tabIndex = stepping ? 0 : -1;
     const done = this.#shown >= total;
-    this.#root.querySelector('.next').textContent = done ? 'Step from the start' : 'Next step';
-    this.#root.querySelector('.step').textContent = `Step ${this.#shown} of ${total}`;
+    $('.next').textContent = done ? 'Step from the start' : 'Next step';
+    $('.prev').disabled = this.#shown <= 1;
+    $('.step').textContent = `Step ${this.#shown} of ${total}`;
+  }
+
+  async #load() {
+    const src = this.getAttribute('src');
+    if (src && this.#code === undefined && this.#fetched === undefined) {
+      try {
+        const res = await fetch(new URL(src, document.baseURI));
+        if (!res.ok) throw new Error(`${src} answered ${res.status}`);
+        this.#fetched = (await res.text()).trim();
+      } catch (e) {
+        return this.#fail(e);
+      }
+    }
+    this.#draw();
   }
 
   async #draw({ still = false } = {}) {
@@ -396,19 +299,23 @@ export class InfdDiagram extends HTMLElement {
     if (!code) return;
     this.#seen?.disconnect();
     this.#clear();
+    this.#stopFlow();
     this.#drawing = true;
     try {
       this.#width = Math.round(this.getBoundingClientRect().width);
       const svg = await renderDiagram(host, code, {
         fit: this.getAttribute('fit') || 'auto',
-        theme: readTheme(this),
+        theme: this.#theme,
       });
-      this.#ranks = rankGraph(svg);
-      this.#reveal(this.#ranks.length, false);
+      this.#svg = svg;
+      ({ steps: this.#steps, graph: this.#graph } = buildSteps(svg, code));
+      this.#view.attach(svg);
+      host.classList.toggle('interactive', !!this.#graph && this.#highlight);
+      this.#reveal(this.#steps.length, false);
       this.dispatchEvent(
-        new CustomEvent('infd-drawn', { detail: { svg, steps: this.#ranks.length } })
+        new CustomEvent('infd-drawn', { detail: { svg, steps: this.#steps.length } })
       );
-      if (still || this.#reduced || this.#ranks.length < 2) return;
+      if (still || this.#reduced || this.#steps.length < 2) return;
       const box = this.getBoundingClientRect();
       if (document.visibilityState === 'visible' && box.top < innerHeight && box.bottom > 0)
         return this.play();
@@ -423,15 +330,23 @@ export class InfdDiagram extends HTMLElement {
       );
       this.#seen.observe(this);
     } catch (e) {
-      host.innerHTML = '';
-      const p = document.createElement('p');
-      p.className = 'error';
-      p.textContent = `Diagram could not be drawn: ${e?.message ?? e}`;
-      host.appendChild(p);
-      this.dispatchEvent(new CustomEvent('infd-error', { detail: e }));
+      this.#fail(e);
     } finally {
       this.#drawing = false;
     }
+  }
+
+  #fail(e) {
+    const host = this.#root.querySelector('.draw');
+    host.innerHTML = '';
+    this.#svg = null;
+    this.#steps = [];
+    const p = document.createElement('p');
+    p.className = 'error';
+    p.textContent = `Diagram could not be drawn: ${e?.message ?? e}`;
+    host.appendChild(p);
+    this.#controls();
+    this.dispatchEvent(new CustomEvent('infd-error', { detail: e }));
   }
 
   #clear() {
@@ -440,31 +355,142 @@ export class InfdDiagram extends HTMLElement {
   }
 
   #reveal(upto, animate) {
-    this.#ranks.forEach((rank, i) => {
+    const speed = this.#speed;
+    const total = this.#steps.length;
+    this.#steps.forEach((step, i) => {
       const on = i < upto;
       const fresh = animate && !this.#reduced && i === upto - 1;
-      rank.edges.forEach((p) => drawEdge(p, on, fresh));
-      rank.nodes.forEach((n) => fadeIn(n, on, fresh, 180));
-      rank.labels.forEach((l) => fadeIn(l, on, fresh, 260));
+      step.edges.forEach((p) => drawEdge(p, on, fresh, speed));
+      step.nodes.forEach((n) => fadeIn(n, on, fresh, 180, speed));
+      step.labels.forEach((l) => fadeIn(l, on, fresh, 260, speed));
     });
     this.#shown = upto;
+    this.#stopFlow();
+    if (this.#svg && upto >= total && this.getAttribute('flow') === 'dots' && !this.#still) {
+      const lines = this.#graph
+        ? this.#graph.edges.map((e) => e.path)
+        : this.#steps.flatMap((s) => s.edges);
+      this.#stopFlow = startFlow(lines, speed);
+    }
+    this.#emphasize();
     this.#controls();
+    // A scripted step keeps showing the last caption until the next one replaces it.
+    const said = this.#steps.slice(0, upto).findLast((s) => s.caption)?.caption ?? '';
+    this.#root.querySelector('.say').textContent = said;
+    if (total)
+      this.dispatchEvent(
+        new CustomEvent('infd-step', {
+          detail: { step: upto, total, caption: this.#steps[upto - 1]?.caption ?? '' },
+        })
+      );
   }
 
-  /** Builds the flow from the start, one rank at a time. */
+  #emphasize(names) {
+    if (!this.#svg) return;
+    const focus = (this.getAttribute('focus') ?? '').split(/[\s,]+/).filter(Boolean);
+    emphasize(this.#svg, this.#graph, names ?? focus, { neighbors: !!names });
+  }
+
+  #hover(box) {
+    const nameOf = (target) => {
+      const g = target?.closest?.('g.node');
+      if (!g || !this.#graph) return undefined;
+      for (const [n, el] of this.#graph.nodes) if (el === g) return n;
+      return undefined;
+    };
+    box.addEventListener('pointerover', (e) => {
+      if (!this.#highlight || e.pointerType === 'touch') return;
+      const n = nameOf(e.target);
+      if (n) this.#emphasize([n]);
+    });
+    box.addEventListener('pointerout', (e) => {
+      if (!this.#highlight || nameOf(e.relatedTarget)) return;
+      this.#emphasize();
+    });
+    box.addEventListener('click', (e) => {
+      const n = nameOf(e.target);
+      if (n)
+        this.dispatchEvent(
+          new CustomEvent('infd-node-click', { detail: { id: n }, bubbles: true, composed: true })
+        );
+    });
+  }
+
+  async #tool(act) {
+    const figure = this.#root.querySelector('figure');
+    if (act === 'in') this.#view.zoomBy(1.25);
+    else if (act === 'out') this.#view.zoomBy(0.8);
+    else if (act === 'reset') this.#view.reset();
+    else if (act === 'full') {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await figure.requestFullscreen?.();
+    } else if (act === 'svg' || act === 'png') await this.download(act);
+  }
+
+  #refit() {
+    if (!this.#svg) return;
+    const box = this.#root.querySelector('.draw');
+    const full = !!document.fullscreenElement;
+    this.#root.querySelector('[data-act="full"]').textContent = full
+      ? 'Exit fullscreen'
+      : 'Fullscreen';
+    if (full)
+      requestAnimationFrame(() => this.#view.fitTo(box.clientWidth - 8, box.clientHeight - 8));
+    else {
+      size(this.#svg, box.clientWidth);
+      this.#view.attach(this.#svg);
+    }
+  }
+
+  /** Builds the diagram from the start, one step at a time. */
   play() {
     this.#clear();
-    const total = this.#ranks.length;
+    const total = this.#steps.length;
     if (this.#reduced) return this.#reveal(total, false);
     this.#reveal(0, false);
+    const speed = this.#speed;
     for (let i = 1; i <= total; i++)
-      this.#timers.push(setTimeout(() => this.#reveal(i, true), 250 + (i - 1) * 650));
+      this.#timers.push(setTimeout(() => this.#reveal(i, true), (250 + (i - 1) * 650) / speed));
   }
 
-  /** Shows the next rank, or starts over from the first. */
+  /** Shows the next step, or starts over from the first. */
   next() {
     this.#clear();
-    this.#reveal(this.#shown >= this.#ranks.length ? 1 : this.#shown + 1, true);
+    this.#reveal(this.#shown >= this.#steps.length ? 1 : this.#shown + 1, true);
+  }
+
+  /** Steps back one. */
+  prev() {
+    this.#clear();
+    this.#reveal(Math.max(1, this.#shown - 1), false);
+  }
+
+  /** Shows steps 1 to `n`, still. `goTo(steps.length)` shows everything. */
+  goTo(n) {
+    this.#clear();
+    this.#reveal(Math.max(0, Math.min(this.#steps.length, Math.round(n))), false);
+  }
+
+  /** The diagram as standalone SVG markup, labels drawn as SVG text. */
+  toSvg() {
+    return toSvg(this.code, { theme: this.#theme });
+  }
+
+  /** The diagram as a PNG Blob at twice its natural size. */
+  toPng(scale = 2) {
+    return toPng(this.code, { theme: this.#theme, scale });
+  }
+
+  /** Saves the diagram as an .svg or .png file named after its caption. */
+  async download(format = 'svg') {
+    const name =
+      (this.getAttribute('caption') || 'diagram')
+        .replace(/[^\w-]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 60)
+        .toLowerCase() || 'diagram';
+    if (format === 'png') download(await this.toPng(), `${name}.png`);
+    else download(await this.toSvg(), `${name}.svg`, 'image/svg+xml');
   }
 }
 

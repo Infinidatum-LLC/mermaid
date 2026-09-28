@@ -5,7 +5,9 @@
  *
  *   v/<version>/mermaid.esm.min.mjs + chunks/   ES module build, immutable
  *   v/<version>/mermaid.min.js                  classic <script> build
- *   v/<version>/diagram.js                      <infd-diagram>, imports the build beside it
+ *   v/<version>/diagram.js                      <infd-diagram>, bundled from src/, imports the build beside it
+ *   v/<version>/client.js                       the client SDK: render, embed, parse, server images
+ *   v/<version>/embed.html                      one diagram, for an <iframe>
  *   latest/...                                  the same files, cached for five minutes
  *   versions.json, index.html                   what is served, and how to use it
  *
@@ -16,6 +18,7 @@ import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = join(here, "..");
@@ -32,6 +35,22 @@ const commit = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 
 await rm(out, { recursive: true, force: true });
 
+// The element is written as modules in src/lib; readers get one file per entry,
+// so a cached copy can never mix with newer modules. Mermaid stays a separate file.
+const bundled = await build({
+  entryPoints: { diagram: join(site, "src", "diagram.js"), client: join(site, "src", "client.js") },
+  bundle: true,
+  format: "esm",
+  target: "es2022",
+  minify: true,
+  legalComments: "none",
+  external: ["./mermaid.esm.min.mjs"],
+  banner: { js: `/* Infinidatum Mermaid ${version} (${commit}). Source: github.com/Infinidatum-LLC/mermaid/tree/develop/infinidatum/src */` },
+  write: false,
+  outdir: "out",
+});
+const entry = Object.fromEntries(bundled.outputFiles.map((f) => [f.path.split(/[\\/]/).pop(), f.contents]));
+
 async function release(dir) {
   const target = join(out, dir);
   await mkdir(join(target, "chunks", "mermaid.esm.min"), { recursive: true });
@@ -41,7 +60,9 @@ async function release(dir) {
   for (const f of await readdir(join(dist, "chunks", "mermaid.esm.min"))) {
     if (f.endsWith(".mjs")) await cp(join(dist, "chunks", "mermaid.esm.min", f), join(target, "chunks", "mermaid.esm.min", f));
   }
-  await cp(join(site, "src", "diagram.js"), join(target, "diagram.js"));
+  await writeFile(join(target, "diagram.js"), entry["diagram.js"]);
+  await writeFile(join(target, "client.js"), entry["client.js"]);
+  await cp(join(site, "src", "embed.html"), join(target, "embed.html"));
 }
 
 await release(join("v", version));
