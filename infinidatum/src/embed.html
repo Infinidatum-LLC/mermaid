@@ -1,0 +1,107 @@
+<!doctype html>
+<!--
+  One diagram, for an <iframe>. Settings come from the URL fragment (or the
+  query string): code or src, the <infd-diagram> attributes, colors
+  (card, panel, ink, ink-soft, rule, accent, ai, ai-bg, good, good-bg, risk,
+  risk-bg), font, bg (a page background, default transparent) and id.
+  The page tells its parent its height and forwards step and click events,
+  each tagged with `id`, so client.js can size the frame.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Diagram</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+      }
+      body {
+        font:
+          14px/1.5 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+      .missing {
+        padding: 12px;
+        font-size: 13px;
+        color: #52635e;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import './diagram.js';
+
+      const ATTRIBUTES = [
+        'caption',
+        'alt',
+        'theme',
+        'flow',
+        'tools',
+        'speed',
+        'animate',
+        'controls',
+        'focus',
+        'highlight',
+        'fit',
+        'src',
+      ];
+      const COLORS = [
+        'card',
+        'panel',
+        'ink',
+        'ink-soft',
+        'rule',
+        'accent',
+        'ai',
+        'ai-bg',
+        'good',
+        'good-bg',
+        'risk',
+        'risk-bg',
+      ];
+
+      const params = new URLSearchParams(location.hash.slice(1) || location.search.slice(1));
+      const id = params.get('id') ?? '';
+      // Only sizes and events go to the parent, never the source.
+      const tell = (type, extra) =>
+        parent !== window && parent.postMessage({ type, id, ...extra }, '*');
+
+      const bg = params.get('bg');
+      if (bg && CSS.supports('color', bg)) document.body.style.background = bg;
+      for (const name of COLORS) {
+        const v = params.get(name);
+        if (v && CSS.supports('color', v)) document.body.style.setProperty(`--infd-${name}`, v);
+      }
+      const font = params.get('font');
+      if (font && CSS.supports('font-family', font))
+        document.body.style.setProperty('--infd-font', font);
+
+      const code = params.get('code');
+      if (!code && !params.get('src')) {
+        document.body.innerHTML =
+          '<p class="missing">No diagram. Add <code>#code=</code> with Mermaid source to the URL.</p>';
+      } else {
+        const el = document.createElement('infd-diagram');
+        for (const k of ATTRIBUTES) if (params.has(k)) el.setAttribute(k, params.get(k));
+        if (code) el.code = code;
+        el.addEventListener('infd-step', (e) => tell('infd-step', { detail: e.detail }));
+        el.addEventListener('infd-node-click', (e) =>
+          tell('infd-node-click', { detail: e.detail })
+        );
+        el.addEventListener('infd-error', (e) =>
+          tell('infd-error', { detail: { message: String(e.detail?.message ?? e.detail) } })
+        );
+        document.body.appendChild(el);
+        new ResizeObserver(() =>
+          tell('infd-embed-size', { height: document.body.getBoundingClientRect().height })
+        ).observe(document.body);
+      }
+    </script>
+  </body>
+</html>

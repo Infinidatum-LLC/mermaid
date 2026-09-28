@@ -5,8 +5,15 @@
   "outputDirectory": "public",
   "framework": null,
   "functions": {
-    "api/*.mjs": { "maxDuration": 10, "includeFiles": "public/v/**/*.mjs" }
+    "api/parse.mjs": { "maxDuration": 10, "includeFiles": "public/v/**/*.mjs" },
+    "api/health.mjs": { "maxDuration": 10, "includeFiles": "public/v/**/*.mjs" },
+    "api/oembed.mjs": { "maxDuration": 10 },
+    "api/render.mjs": {
+      "maxDuration": 30,
+      "includeFiles": "{public/v/**/*.{mjs,js},node_modules/@sparticuz/chromium/bin/**}"
+    }
   },
+  "redirects": [{ "source": "/embed", "destination": "/latest/embed.html", "permanent": false }],
   "headers": [
     {
       "source": "/(.*)",
