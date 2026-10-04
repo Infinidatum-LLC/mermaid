@@ -7,6 +7,7 @@
  *   v/<version>/mermaid.min.js                  classic <script> build
  *   v/<version>/diagram.js                      <infd-diagram>, bundled from src/, imports the build beside it
  *   v/<version>/client.js                       the client SDK: render, embed, parse, server images
+ *   v/<version>/flow.js                         <infd-flow> and the flowchart functions; no Mermaid
  *   v/<version>/embed.html                      one diagram, for an <iframe>
  *   latest/...                                  the same files, cached for five minutes
  *   versions.json, index.html                   what is served, and how to use it
@@ -38,7 +39,7 @@ await rm(out, { recursive: true, force: true });
 // The element is written as modules in src/lib; readers get one file per entry,
 // so a cached copy can never mix with newer modules. Mermaid stays a separate file.
 const bundled = await build({
-  entryPoints: { diagram: join(site, "src", "diagram.js"), client: join(site, "src", "client.js") },
+  entryPoints: { diagram: join(site, "src", "diagram.js"), client: join(site, "src", "client.js"), flow: join(site, "src", "flow.js") },
   bundle: true,
   format: "esm",
   target: "es2022",
@@ -62,6 +63,7 @@ async function release(dir) {
   }
   await writeFile(join(target, "diagram.js"), entry["diagram.js"]);
   await writeFile(join(target, "client.js"), entry["client.js"]);
+  await writeFile(join(target, "flow.js"), entry["flow.js"]);
   await cp(join(site, "src", "embed.html"), join(target, "embed.html"));
 }
 

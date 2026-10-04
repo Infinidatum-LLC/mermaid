@@ -9,6 +9,7 @@ Everything Infinidatum adds lives in this folder. The rest of the repository is 
 | Path                               | What                                                                                        |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
 | `/v/<version>/diagram.js`          | `<infd-diagram>`: a themed diagram that builds in the order it reads, with step controls.   |
+| `/v/<version>/flow.js`             | `<infd-flow>`: the lightweight flowchart. No Mermaid download; about 8 KB gzipped.          |
 | `/v/<version>/client.js`           | Client SDK: `render`, `embed`, `embedUrl`, `parse`, `renderSvg`, `renderPng`, `imageUrl`.   |
 | `/v/<version>/embed.html#code=...` | One diagram for an `<iframe>`; `/embed` redirects to the latest.                            |
 | `/v/<version>/mermaid.esm.min.mjs` | The fork's Mermaid, as an ES module.                                                        |
@@ -16,6 +17,7 @@ Everything Infinidatum adds lives in this folder. The rest of the repository is 
 | `/latest/...`                      | The same files, following the fork. Cached five minutes. Use `/v/<version>/` in production. |
 | `POST /api/parse`                  | Syntax check with this exact build. `{ code }` or `{ diagrams: { key: code } }`.            |
 | `GET/POST /api/render`             | The diagram as SVG or PNG, drawn in headless Chrome. GET answers are CDN-cached.            |
+| `GET/POST /api/flow`               | A flowchart in the `<infd-flow>` subset as SVG, HTML or JSON. No browser; milliseconds.     |
 | `GET /api/oembed?url=...`          | oEmbed for embed page links.                                                                |
 | `GET /api/health`                  | The version being served.                                                                   |
 
@@ -49,9 +51,29 @@ const png = await infd.renderPng(code, { theme: 'dark' }); // drawn on the serve
 const src = infd.imageUrl(code); // <img src>, email, Markdown
 ```
 
+### The lightweight flowchart
+
+For a flowchart that must load fast (lesson pages, server HTML), use `<infd-flow>` from `flow.js`. It draws a strict subset of Mermaid's flowchart with its own layout, so the same text also draws in `<infd-diagram>`:
+
+<!-- prettier-ignore -->
+```html
+<script type="module" src="https://<host>/v/12.0.0/flow.js"></script>
+
+<infd-flow caption="A person checks every draft." alt="Staff ask, the AI drafts, a person checks it, then it is sent.">
+  flowchart LR
+    A[Staff ask]:::person --> B[AI drafts]:::ai --> C{Right?}:::check
+    C -->|Yes| D[Send]:::done
+    C -.->|No| B
+</infd-flow>
+```
+
+The subset: `flowchart LR|TD`, boxes `A[...]` (quoted labels allowed), decisions `D{...}`, arrows `-->` and `-.->` with optional `|labels|` and chains, and the five box classes. Anything else (subgraphs, styles, other shapes, other diagram types) is an error naming its line; use `<infd-diagram>` for those. The figure picks among four layouts by container query, so it fits its column with no script, and builds rank by rank when scrolled into view (still for reduced motion and print). Attributes: `caption`, `alt`, `theme`, `variant="compact"`, `animate="none"`, `src`.
+
+On a server, import `flowFigure`, `FLOW_CSS` and `playAll` from `flow.js` and write the figure into the page yourself, or call `/api/flow?code=...&format=html`. For email or Markdown, use `/api/flow?code=...` as an `<img src>`: a standalone SVG with colors baked in.
+
 ## Source layout
 
-`src/diagram.js` is the element; `src/lib/` holds its parts (theme, render, steps, motion, viewport, export). `scripts/assemble.mjs` bundles them with esbuild into one `diagram.js` per release, with Mermaid left as its own file. `api/_browser.mjs` runs that bundle in headless Chromium (`@sparticuz/chromium` on Vercel) for `/api/render`; its page can load only the release's own files.
+`src/diagram.js` is the element; `src/lib/` holds its parts (theme, render, steps, motion, viewport, export). `scripts/assemble.mjs` bundles them with esbuild into one `diagram.js` per release (and `src/flow.js` with `src/flow/` into `flow.js`), with Mermaid left as its own file. `api/_browser.mjs` runs that bundle in headless Chromium (`@sparticuz/chromium` on Vercel) for `/api/render`; its page can load only the release's own files.
 
 ## Build and deploy
 
